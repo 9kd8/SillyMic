@@ -33,7 +33,7 @@ jobs:
           bundler-cache: true
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=dev
 
       - name: Install CocoaPods (Bundler)
         run: |
