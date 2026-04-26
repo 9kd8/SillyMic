@@ -1,4 +1,5 @@
 import InCallManager from 'react-native-incall-manager';
+import {Platform} from 'react-native';
 import {
   RTCIceCandidate,
   RTCPeerConnection,
@@ -145,10 +146,20 @@ export class BridgeClient {
     };
 
     peer.ontrack = () => {
-      this.startLevelMeter();
-      InCallManager.start({media: 'audio', auto: true});
-      InCallManager.setSpeakerphoneOn(true);
-      this.events.onStatus('streaming');
+      try {
+        this.startLevelMeter();
+        InCallManager.start({media: 'audio', auto: true});
+        if (Platform.OS === 'android') {
+          InCallManager.setSpeakerphoneOn(true);
+        }
+        this.events.onStatus('streaming');
+      } catch (error) {
+        this.events.onError(
+          `Audio output init failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     };
 
     peer.onconnectionstatechange = () => {
@@ -249,21 +260,35 @@ export class BridgeClient {
   private startLevelMeter() {
     this.stopLevelMeter();
     this.previousBytes = 0;
-    this.levelInterval = setInterval(async () => {
+    this.levelInterval = setInterval(() => {
+      this.pollAudioLevel();
+    }, 300);
+  }
+
+  private async pollAudioLevel() {
+    try {
       if (!this.peer) {
         return;
       }
+
       const stats = await this.peer.getStats();
       let nextLevel = 0;
+      const reports: any[] = [];
 
-      stats.forEach((report: any) => {
-        if (report.type !== 'inbound-rtp' || report.kind !== 'audio') {
-          return;
+      if (stats && typeof (stats as any).forEach === 'function') {
+        (stats as any).forEach((report: any) => reports.push(report));
+      } else if (stats && typeof stats === 'object') {
+        reports.push(...Object.values(stats as Record<string, any>));
+      }
+
+      for (const report of reports) {
+        if (report?.type !== 'inbound-rtp' || report?.kind !== 'audio') {
+          continue;
         }
 
         if (typeof report.audioLevel === 'number') {
           nextLevel = Math.max(nextLevel, report.audioLevel);
-          return;
+          continue;
         }
 
         const bytes = Number(report.bytesReceived || 0);
@@ -273,10 +298,17 @@ export class BridgeClient {
           nextLevel = Math.max(nextLevel, normalized);
         }
         this.previousBytes = bytes;
-      });
+      }
 
       this.events.onLevel(nextLevel);
-    }, 300);
+    } catch (error) {
+      this.events.onLevel(0);
+      this.events.onError(
+        `Audio level probe failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private stopLevelMeter() {
