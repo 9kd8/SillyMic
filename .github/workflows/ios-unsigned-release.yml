@@ -1,14 +1,14 @@
-name: ios-unsigned-ipa-fast
+name: ios-unsigned-ipa-release
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: ios-unsigned-ipa-fast-${{ github.ref }}
+  group: ios-unsigned-ipa-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-unsigned-ipa-fast:
+  build-unsigned-ipa-release:
     runs-on: macos-14
     defaults:
       run:
@@ -16,8 +16,7 @@ jobs:
     env:
       IOS_SCHEME: SillyMicNative
       IOS_WORKSPACE: ios/SillyMicNative.xcworkspace
-      IOS_CONFIGURATION: Debug
-      DERIVED_DATA_PATH: build/DerivedData
+      ARCHIVE_PATH: build/SillyMicMobile.xcarchive
       BUNDLE_GEMFILE: ${{ github.workspace }}/mobile/Gemfile
 
     steps:
@@ -55,23 +54,22 @@ jobs:
           cd ios
           bundle exec pod install
 
-      - name: Build unsigned app (fast)
+      - name: Build unsigned archive (release)
         run: |
           xcodebuild \
             -workspace "$IOS_WORKSPACE" \
             -scheme "$IOS_SCHEME" \
-            -configuration "$IOS_CONFIGURATION" \
+            -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath "$DERIVED_DATA_PATH" \
-            COMPILER_INDEX_STORE_ENABLE=NO \
+            -archivePath "$ARCHIVE_PATH" \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            archive
 
       - name: Pack unsigned IPA
         run: |
-          APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/$IOS_CONFIGURATION-iphoneos" -name "*.app" | head -n 1)
+          APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found in build products"
+            echo "No .app found in archive products"
             exit 1
           fi
           mkdir -p build/Payload
@@ -82,5 +80,5 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sillymic-mobile-unsigned-ipa-fast
+          name: sillymic-mobile-unsigned-ipa-release
           path: mobile/build/SillyMicMobile-unsigned.ipa
