@@ -23,6 +23,7 @@ type PeerConnectionWithHandlers = RTCPeerConnection & {
     | null;
   ontrack: (() => void) | null;
   onconnectionstatechange: (() => void) | null;
+  onicegatheringstatechange: (() => void) | null;
 };
 
 type RemoteIceCandidateInit = {
@@ -205,10 +206,13 @@ export class BridgeClient {
     const offer = await this.peer.createOffer({
       offerToReceiveAudio: true,
     });
-    await this.peer.setLocalDescription(offer);
+    await peer.setLocalDescription(offer);
+    await this.waitForIceGatheringComplete(peer, 1500);
+    const localSdp = peer.localDescription?.sdp ?? offer.sdp ?? '';
+
     this.send({
       type: 'offer',
-      sdp: offer.sdp ?? '',
+      sdp: localSdp,
     });
   }
 
@@ -362,14 +366,34 @@ export class BridgeClient {
       }
 
       this.events.onLevel(nextLevel);
-    } catch (error) {
+    } catch {
       this.events.onLevel(0);
-      this.events.onError(
-        `Audio level probe failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
     }
+  }
+
+  private async waitForIceGatheringComplete(
+    peer: PeerConnectionWithHandlers,
+    timeoutMs: number,
+  ) {
+    if (peer.iceGatheringState === 'complete') {
+      return;
+    }
+
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        peer.onicegatheringstatechange = null;
+        resolve();
+      }, timeoutMs);
+
+      peer.onicegatheringstatechange = () => {
+        if (peer.iceGatheringState !== 'complete') {
+          return;
+        }
+        clearTimeout(timer);
+        peer.onicegatheringstatechange = null;
+        resolve();
+      };
+    });
   }
 
   private stopLevelMeter() {
