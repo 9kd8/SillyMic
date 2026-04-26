@@ -3,6 +3,10 @@ name: ios-unsigned-ipa
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ios-unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-unsigned-ipa:
     runs-on: macos-14
@@ -32,13 +36,23 @@ jobs:
           ruby-version: '3.2'
           bundler-cache: true
 
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            mobile/ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('mobile/ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
       - name: Install dependencies
         run: npm ci --include=dev
 
       - name: Install CocoaPods (Bundler)
         run: |
           cd ios
-          bundle exec pod install --repo-update
+          bundle exec pod install
 
       - name: Build unsigned archive
         run: |
