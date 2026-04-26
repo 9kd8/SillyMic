@@ -13,6 +13,7 @@ jobs:
       IOS_SCHEME: SillyMicNative
       IOS_WORKSPACE: ios/SillyMicNative.xcworkspace
       ARCHIVE_PATH: build/SillyMicMobile.xcarchive
+      BUNDLE_GEMFILE: ${{ github.workspace }}/mobile/Gemfile
 
     steps:
       - name: Checkout
@@ -21,15 +22,23 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Ruby + Bundler
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Install CocoaPods
+      - name: Install CocoaPods (Bundler)
         run: |
           cd ios
-          pod install
+          bundle exec pod install --repo-update
 
       - name: Build unsigned archive
         run: |
