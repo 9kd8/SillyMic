@@ -144,16 +144,10 @@ export class BridgeClient {
     peer.addTransceiver('audio', {direction: 'recvonly'});
 
     peer.onicecandidate = event => {
-      const candidate = event.candidate;
-      if (!candidate) {
+      // Non-trickle mode: candidates are sent in the final SDP offer.
+      if (!event.candidate) {
         return;
       }
-      this.send({
-        type: 'ice_candidate',
-        candidate: candidate.candidate,
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-      });
     };
 
     peer.ontrack = () => {
@@ -192,8 +186,11 @@ export class BridgeClient {
       offerToReceiveAudio: true,
     });
     await peer.setLocalDescription(offer);
-    await this.waitForIceGatheringComplete(peer, 1500);
+    await this.waitForIceGatheringComplete(peer, 8000);
     const localSdp = peer.localDescription?.sdp ?? offer.sdp ?? '';
+    if (!localSdp.includes('a=candidate')) {
+      this.events.onError('ICE gathering returned no candidates');
+    }
 
     this.send({
       type: 'offer',
