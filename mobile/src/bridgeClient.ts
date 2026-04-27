@@ -1,7 +1,6 @@
 import InCallManager from 'react-native-incall-manager';
 import {Platform} from 'react-native';
 import {
-  RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
 } from 'react-native-webrtc';
@@ -26,12 +25,6 @@ type PeerConnectionWithHandlers = RTCPeerConnection & {
   onicegatheringstatechange: (() => void) | null;
 };
 
-type RemoteIceCandidateInit = {
-  candidate: string;
-  sdpMid?: string;
-  sdpMLineIndex?: number;
-};
-
 export class BridgeClient {
   private ws: WebSocket | null = null;
   private peer: RTCPeerConnection | null = null;
@@ -42,8 +35,6 @@ export class BridgeClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private levelInterval: ReturnType<typeof setInterval> | null = null;
   private previousBytes = 0;
-  private remoteDescriptionSet = false;
-  private pendingRemoteIceCandidates: RemoteIceCandidateInit[] = [];
 
   constructor(events: BridgeEvents) {
     this.events = events;
@@ -53,8 +44,6 @@ export class BridgeClient {
     this.config = config;
     this.manualDisconnect = false;
     this.reconnectAttempt = 0;
-    this.remoteDescriptionSet = false;
-    this.pendingRemoteIceCandidates = [];
     this.connectAttempt();
   }
 
@@ -72,8 +61,6 @@ export class BridgeClient {
       this.peer?.close();
     } catch {}
     this.peer = null;
-    this.remoteDescriptionSet = false;
-    this.pendingRemoteIceCandidates = [];
 
     InCallManager.stop();
     this.events.onLevel(0);
@@ -152,8 +139,6 @@ export class BridgeClient {
     this.peer = new RTCPeerConnection({
       iceServers: [{urls: 'stun:stun.l.google.com:19302'}],
     });
-    this.remoteDescriptionSet = false;
-    this.pendingRemoteIceCandidates = [];
     const peer = this.peer as PeerConnectionWithHandlers;
 
     peer.addTransceiver('audio', {direction: 'recvonly'});
@@ -231,18 +216,9 @@ export class BridgeClient {
             sdp: msg.sdp,
           }),
         );
-        this.remoteDescriptionSet = true;
-        await this.flushPendingRemoteIceCandidates();
         return;
       case 'ice_candidate':
-        if (!this.peer) {
-          return;
-        }
-        await this.addOrQueueRemoteIceCandidate({
-          candidate: msg.candidate,
-          sdpMid: msg.sdpMid ?? undefined,
-          sdpMLineIndex: msg.sdpMLineIndex ?? undefined,
-        });
+        // LAN mode: ignore trickle ICE and rely on candidates already embedded in SDP.
         return;
       case 'error':
         this.events.onError(`${msg.code}: ${msg.message}`);
@@ -258,42 +234,6 @@ export class BridgeClient {
       return;
     }
     this.ws.send(JSON.stringify(msg));
-  }
-
-  private async addOrQueueRemoteIceCandidate(candidate: RemoteIceCandidateInit) {
-    if (!this.remoteDescriptionSet) {
-      this.pendingRemoteIceCandidates.push(candidate);
-      return;
-    }
-    await this.tryAddRemoteIceCandidate(candidate);
-  }
-
-  private async flushPendingRemoteIceCandidates() {
-    if (!this.remoteDescriptionSet || !this.peer) {
-      return;
-    }
-
-    const pending = [...this.pendingRemoteIceCandidates];
-    this.pendingRemoteIceCandidates = [];
-    for (const candidate of pending) {
-      await this.tryAddRemoteIceCandidate(candidate);
-    }
-  }
-
-  private async tryAddRemoteIceCandidate(candidate: RemoteIceCandidateInit) {
-    if (!this.peer) {
-      return;
-    }
-
-    try {
-      await this.peer.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (error) {
-      this.events.onError(
-        `ICE candidate ignored: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private scheduleReconnect() {
